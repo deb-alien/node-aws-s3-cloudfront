@@ -1,15 +1,16 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
 import sharp from 'sharp';
+import { attachSignedUrls } from './lib/utils/helper.js';
 import PostModel from './schemas/post.schema.js';
 
 dotenv.config({ quiet: true });
 
-// ✅ Proper naming
+// Proper naming
 const bucketName = process.env.AWS_BUCKET_NAME;
 const bucketRegion = process.env.AWS_REGION;
 const accessKey = process.env.AWS_IAM_ACCESS_KEY_ID;
@@ -39,8 +40,8 @@ const upload = multer({ storage });
 app.get('/posts', async (req, res) => {
 	try {
 		const posts = await PostModel.find();
-
-		return res.status(200).json(posts);
+		const postsWithSignedUrls = await attachSignedUrls(posts);
+		return res.status(200).json(postsWithSignedUrls);
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: 'Something went wrong' });
@@ -72,6 +73,28 @@ app.post('/post/new', upload.single('image'), async (req, res) => {
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: 'Upload failed' });
+	}
+});
+
+app.delete('/post/:postId', async (req, res) => {
+	try {
+		const posts = await PostModel.findById(req.params.postId);
+		if (!posts) return res.status(404).json({ message: 'Post not found' });
+
+		await s3.send(
+			new DeleteObjectCommand({
+				Bucket: bucketName,
+				Key: posts.image,
+			}),
+		);
+
+		// await PostModel.findByIdAndDelete(req.params.postId)
+		await posts.deleteOne();
+
+		return res.status(200).json({ message: 'Post deleted' });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: 'Something went wrong' });
 	}
 });
 
