@@ -1,30 +1,17 @@
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
 import sharp from 'sharp';
+import { s3 } from './lib/s3/s3.js';
 import { attachSignedUrls } from './lib/utils/helper.js';
 import PostModel from './schemas/post.schema.js';
 
 dotenv.config({ quiet: true });
 
-// Proper naming
-const bucketName = process.env.AWS_BUCKET_NAME;
-const bucketRegion = process.env.AWS_REGION;
-const accessKey = process.env.AWS_IAM_ACCESS_KEY_ID;
-const secretKey = process.env.AWS_IAM_SECRET_ACCESS_KEY;
-
 const randomImageName = (bytes = 32) => crypto.randomBytes(bytes).toString('hex');
-
-const s3 = new S3Client({
-	credentials: {
-		accessKeyId: accessKey,
-		secretAccessKey: secretKey,
-	},
-	region: bucketRegion,
-});
 
 const app = express();
 
@@ -40,8 +27,8 @@ const upload = multer({ storage });
 app.get('/posts', async (req, res) => {
 	try {
 		const posts = await PostModel.find();
-		const postsWithSignedUrls = await attachSignedUrls(posts);
-		return res.status(200).json(postsWithSignedUrls);
+		const signedPosts = await attachSignedUrls(posts);
+		return res.status(200).json(signedPosts);
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: 'Something went wrong' });
@@ -66,7 +53,7 @@ app.post('/post/new', upload.single('image'), async (req, res) => {
 
 		const post = await PostModel.create({
 			...req.body,
-			image: imageName, // save only key
+			image: process.env.imageName, // save only key
 		});
 
 		res.status(201).json(post);
