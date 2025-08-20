@@ -5,9 +5,10 @@ import express from 'express';
 import mongoose from 'mongoose';
 import multer from 'multer';
 import sharp from 'sharp';
-import { s3 } from './lib/s3/s3.js';
+import { cloudFrontClient, s3, bucketName, cloudFrontDistId } from './lib/s3/s3.js';
 import { attachSignedUrls } from './lib/utils/helper.js';
 import PostModel from './schemas/post.schema.js';
+import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 
 dotenv.config({ quiet: true });
 
@@ -65,18 +66,32 @@ app.post('/post/new', upload.single('image'), async (req, res) => {
 
 app.delete('/post/:postId', async (req, res) => {
 	try {
-		const posts = await PostModel.findById(req.params.postId);
-		if (!posts) return res.status(404).json({ message: 'Post not found' });
+		const post = await PostModel.findById(req.params.postId);
+		if (!post) return res.status(404).json({ message: 'Post not found' });
 
 		await s3.send(
 			new DeleteObjectCommand({
 				Bucket: bucketName,
-				Key: posts.image,
+				Key: post.image,
 			}),
 		);
 
+        // invalidate the cdn cache
+        await cloudFrontClient.send(
+            new CreateInvalidationCommand({
+                DistributionId: cloudFrontDistId,
+                InvalidationBatch: {
+                    CallerReference: Date.now().toString(),
+                    Paths: {
+                        Quantity: 1,
+                        Items: [`/${post.image}`],
+                    },
+                },
+            }),
+        );
+
 		// await PostModel.findByIdAndDelete(req.params.postId)
-		await posts.deleteOne();
+		await post.deleteOne();
 
 		return res.status(200).json({ message: 'Post deleted' });
 	} catch (error) {
@@ -95,4 +110,9 @@ app.listen(process.env.PORT, () => {
  * Create a IAM user with programmatic access
  * Attach the bucket policy to the user
  * Create a IAM access key
+ * create a cloudfront distribution
+ * create a cloudfront origin access identity
+ * add the origin access identity to the distribution
+ * add the bucket to the distribution
+ * create a signed url
  */
