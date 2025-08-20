@@ -1,5 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -41,21 +40,7 @@ app.get('/posts', async (req, res) => {
 	try {
 		const posts = await PostModel.find();
 
-		const postsWithSignedUrl = await Promise.all(
-			posts.map(async (post) => {
-				const url = await getSignedUrl(
-					s3,
-					new GetObjectCommand({
-						Bucket: bucketName,
-						Key: post.image, // we save only the key in DB
-					}),
-					{ expiresIn: 60 * 60 * 24 }, // 1 day
-				);
-				return { ...post.toObject(), imageUrl: url };
-			}),
-		);
-
-		res.json(postsWithSignedUrl);
+		return res.status(200).json(posts);
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: 'Something went wrong' });
