@@ -1,28 +1,20 @@
+import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express from 'express';
-import mongoose from 'mongoose';
-import multer from 'multer';
 import sharp from 'sharp';
-import { cloudFrontClient, s3, bucketName, cloudFrontDistId } from './lib/s3/s3.js';
-import { attachSignedUrls } from './lib/utils/helper.js';
+import connectMongo from './lib/mongo/mongo.js';
+import { bucketName, cloudFrontClient, cloudFrontDistId, s3 } from './lib/s3/s3.js';
+import { attachSignedUrls, randomImageName } from './lib/utils/helper.js';
+import { upload } from './lib/utils/multer.js';
 import PostModel from './schemas/post.schema.js';
-import { CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 
 dotenv.config({ quiet: true });
 
-const randomImageName = (bytes = 32) => crypto.randomBytes(bytes).toString('hex');
-
 const app = express();
-
-mongoose.connect(process.env.MONGO_URI).then(() => console.log('Database connected'));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
 
 // Get posts with signed URL
 app.get('/posts', async (req, res) => {
@@ -54,7 +46,7 @@ app.post('/post/new', upload.single('image'), async (req, res) => {
 
 		const post = await PostModel.create({
 			...req.body,
-			image: process.env.imageName, // save only key
+			image: imageName, // save only key
 		});
 
 		res.status(201).json(post);
@@ -76,21 +68,19 @@ app.delete('/post/:postId', async (req, res) => {
 			}),
 		);
 
-        // invalidate the cdn cache
-        await cloudFrontClient.send(
-            new CreateInvalidationCommand({
-                DistributionId: cloudFrontDistId,
-                InvalidationBatch: {
-                    CallerReference: Date.now().toString(),
-                    Paths: {
-                        Quantity: 1,
-                        Items: [`/${post.image}`],
-                    },
-                },
-            }),
-        );
+		await cloudFrontClient.send(
+			new CreateInvalidationCommand({
+				DistributionId: cloudFrontDistId,
+				InvalidationBatch: {
+					CallerReference: Date.now().toString(),
+					Paths: {
+						Quantity: 1,
+						Items: [`/${post.image}`],
+					},
+				},
+			}),
+		);
 
-		// await PostModel.findByIdAndDelete(req.params.postId)
 		await post.deleteOne();
 
 		return res.status(200).json({ message: 'Post deleted' });
@@ -100,7 +90,8 @@ app.delete('/post/:postId', async (req, res) => {
 	}
 });
 
-app.listen(process.env.PORT, () => {
+app.listen(process.env.PORT, async () => {
+	await connectMongo();
 	console.log(`Server is running on port ${process.env.PORT}`);
 });
 
